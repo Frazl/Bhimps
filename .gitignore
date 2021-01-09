@@ -1,0 +1,4 @@
+src/__pycache__/*
+src/*.py[cod]
+src/bhimps.db
+.vscode/*

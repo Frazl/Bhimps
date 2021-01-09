@@ -1,0 +1,4 @@
+discord.py==1.5.1
+pylint==2.4.4
+pycodestyle==2.6.0
+python-dotenv==0.15.0
