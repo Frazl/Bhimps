@@ -16,7 +16,7 @@ func Setup() *sql.DB {
 	}
 	statement, _ := database.Prepare("CREATE TABLE IF NOT EXISTS userscores (id INTEGER NOT NULL PRIMARY KEY, score INTEGER)")
 	statement.Exec()
-	statement, _ = database.Prepare("CREATE TABLE IF NOT EXISTS messages (id INTEGER NOT NULL PRIMARY KEY, cid INTEGER, score INTEGER)")
+	statement, _ = database.Prepare("CREATE TABLE IF NOT EXISTS messages (id INTEGER NOT NULL PRIMARY KEY, cid INTEGER, userID INTEGER, score INTEGER)")
 	statement.Exec()
 	return database
 }
@@ -119,7 +119,7 @@ func GetUserScores(database *sql.DB, amount int, desc bool) []UserScore {
 
 // Handling message scoreboard
 
-func ModifyMessageScore(database *sql.DB, channel int, message int, changeAmount int) {
+func ModifyMessageScore(database *sql.DB, channel int, message int, userID int, changeAmount int) {
 	// Ensure user exists in the database
 	statement, _ := database.Prepare("SELECT * FROM messages WHERE id = ? AND cid = ?")
 	res, err := statement.Query(message, channel)
@@ -130,8 +130,8 @@ func ModifyMessageScore(database *sql.DB, channel int, message int, changeAmount
 	messageExists := res.Next()
 	res.Close()
 	if !messageExists {
-		statement, err := database.Prepare("INSERT INTO messages (id, cid, score) VALUES (?, ?, 0)")
-		statement.Exec(message, channel)
+		statement, err := database.Prepare("INSERT INTO messages (id, cid, userID, score) VALUES (?, ?, ?, 0)")
+		statement.Exec(message, channel, userID)
 		if err != nil {
 			log.Println(err)
 			log.Fatalln("Failed to set message score to inital value")
@@ -186,6 +186,36 @@ func GetMessageScores(database *sql.DB, amount int, desc bool) []MessageScore {
 		log.Fatalf("Failed to get message scores")
 	}
 	res, _ := statement.Query(amount)
+	var messageScores = make([]MessageScore, amount)
+	var i int = 0
+	for res.Next() {
+		var messageScore MessageScore
+		var messageID int
+		var channelID int
+		var score int
+		res.Scan(&messageID, &channelID, &score)
+		messageScore.MessageID = strconv.Itoa(messageID)
+		messageScore.ChannelID = strconv.Itoa(channelID)
+		messageScore.Score = score
+		messageScores[i] = messageScore
+		i++
+	}
+	return messageScores[:i]
+}
+
+func GetUserMessageScores(database *sql.DB, userID int, amount int, desc bool) []MessageScore {
+	var order string
+	if desc {
+		order = "DESC"
+	} else {
+		order = "ASC"
+	}
+	statement, err := database.Prepare("SELECT id, cid, score FROM messages WHERE score != 0 AND userID = ? ORDER BY score " + order + " LIMIT ?")
+	if err != nil {
+		log.Println(err)
+		log.Fatalf("Failed to get message scores")
+	}
+	res, _ := statement.Query(userID, amount)
 	var messageScores = make([]MessageScore, amount)
 	var i int = 0
 	for res.Next() {

@@ -64,6 +64,11 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		var us = datamanager.UserScore{ID: mentionee, Score: score}
 		userScores := []datamanager.UserScore{us}
 		sendUserScoresEmbed(s, userScores)
+	} else if len(m.Mentions) > 0 && strings.HasPrefix(m.Content, "!top") {
+		// Get best messages of a particular user
+		mentionee, _ := strconv.Atoi(m.Mentions[0].ID)
+		messageScores := datamanager.GetUserMessageScores(db, mentionee, 10, !strings.Contains(m.Content, "-"))
+		sendMessageScoreEmbeds(s, messageScores)
 	}
 }
 
@@ -100,19 +105,19 @@ func messageReactionAdd(s *discordgo.Session, mra *discordgo.MessageReactionAdd)
 	responseEmbed := new(discordgo.MessageEmbed)
 	if emojiName == "plustwo" {
 		datamanager.ModifyUserScore(db, msgAuthorId, 2)
-		datamanager.ModifyMessageScore(db, chID, msgID, 2)
+		datamanager.ModifyMessageScore(db, chID, msgID, msgAuthorId, 2)
 		responseEmbed.Color = 0x0e6b0e
 	} else if emojiName == "plusone" {
 		datamanager.ModifyUserScore(db, msgAuthorId, 1)
-		datamanager.ModifyMessageScore(db, chID, msgID, 1)
+		datamanager.ModifyMessageScore(db, chID, msgID, msgAuthorId, 1)
 		responseEmbed.Color = 0x0e6b0e
 	} else if emojiName == "minustwo" {
 		datamanager.ModifyUserScore(db, msgAuthorId, -2)
-		datamanager.ModifyMessageScore(db, chID, msgID, -2)
+		datamanager.ModifyMessageScore(db, chID, msgID, msgAuthorId, -2)
 		responseEmbed.Color = 0xe51937
 	} else if emojiName == "minusone" {
 		datamanager.ModifyUserScore(db, msgAuthorId, -1)
-		datamanager.ModifyMessageScore(db, chID, msgID, -1)
+		datamanager.ModifyMessageScore(db, chID, msgID, msgAuthorId, -1)
 		responseEmbed.Color = 0xe51937
 	} else {
 		return
@@ -156,19 +161,19 @@ func messageReactionRemove(s *discordgo.Session, mrr *discordgo.MessageReactionR
 	responseEmbed := new(discordgo.MessageEmbed)
 	if emojiName == "plustwo" {
 		datamanager.ModifyUserScore(db, msgAuthorId, -2)
-		datamanager.ModifyMessageScore(db, chID, msgID, -2)
+		datamanager.ModifyMessageScore(db, chID, msgID, msgAuthorId, -2)
 		responseEmbed.Color = 0xe51937
 	} else if emojiName == "plusone" {
 		datamanager.ModifyUserScore(db, msgAuthorId, -1)
-		datamanager.ModifyMessageScore(db, chID, msgID, -1)
+		datamanager.ModifyMessageScore(db, chID, msgID, msgAuthorId, -1)
 		responseEmbed.Color = 0xe51937
 	} else if emojiName == "minustwo" {
 		datamanager.ModifyUserScore(db, msgAuthorId, 2)
-		datamanager.ModifyMessageScore(db, chID, msgID, 2)
+		datamanager.ModifyMessageScore(db, chID, msgID, msgAuthorId, 2)
 		responseEmbed.Color = 0x0e6b0e
 	} else if emojiName == "minusone" {
 		datamanager.ModifyUserScore(db, msgAuthorId, 1)
-		datamanager.ModifyMessageScore(db, chID, msgID, 1)
+		datamanager.ModifyMessageScore(db, chID, msgID, msgAuthorId, 1)
 		responseEmbed.Color = 0x0e6b0e
 	} else {
 		return
@@ -245,8 +250,9 @@ func sendMessageScoreEmbeds(s *discordgo.Session, messagescores []datamanager.Me
 		responseEmbed.Author = &mea
 		responseEmbed.Description = originalMessage.Content
 
+		// Adds the Message Context link that linkts to the original message
 		embedContextField := getMessageContext(originalMessage.Reference())
-		responseEmbed.Description += "\n" + embedContextField
+		responseEmbed.Description += "\n\n" + embedContextField
 
 		// Add user's image thumbnail
 		authorUser, _ := s.User(originalMessage.Author.ID)
