@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
 )
@@ -22,7 +23,7 @@ var GUILD_ID, BOT_CHANNEL_ID string
 func main() {
 	log.Println("Beginning database setup")
 	db = datamanager.Setup()
-	dg, err := discordgo.New("Bot " + "BOT_TOKEN")
+	dg, err := discordgo.New("Bot " + os.Getenv("BOT_TOKEN"))
 	dg.AddHandler(messageCreate)
 	dg.AddHandler(messageReactionAdd)
 	dg.AddHandler(messageReactionRemove)
@@ -57,9 +58,10 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		messageScores := datamanager.GetMessageScores(db, 10, false)
 		sendMessageScoreEmbeds(s, messageScores)
 	} else if len(m.Mentions) > 0 && strings.HasPrefix(m.Content, "!score") {
+		// Get score of a particular user
 		mentionee, _ := strconv.Atoi(m.Mentions[0].ID)
 		score := datamanager.GetUserScore(db, mentionee)
-		var us = datamanager.UserScore{mentionee, score}
+		var us = datamanager.UserScore{ID: mentionee, Score: score}
 		userScores := []datamanager.UserScore{us}
 		sendUserScoresEmbed(s, userScores)
 	}
@@ -71,6 +73,13 @@ func messageReactionAdd(s *discordgo.Session, mra *discordgo.MessageReactionAdd)
 
 	// If message reactor same as author then don't do anything
 	if msg.Author.ID == mra.MessageReaction.UserID {
+		return
+	}
+
+	msgTime, err := msg.Timestamp.Parse()
+	if !timeInSeason(&msgTime) {
+		reactor, _ := s.GuildMember(GUILD_ID, mra.MessageReaction.UserID)
+		reactionNotInSeasonEmbed(s, reactor.Mention())
 		return
 	}
 
@@ -126,6 +135,13 @@ func messageReactionRemove(s *discordgo.Session, mrr *discordgo.MessageReactionR
 
 	// If message reactor same as author then don't do anything
 	if msg.Author.ID == mrr.MessageReaction.UserID {
+		return
+	}
+
+	msgTime, err := msg.Timestamp.Parse()
+	if !timeInSeason(&msgTime) {
+		reactor, _ := s.GuildMember(GUILD_ID, mrr.MessageReaction.UserID)
+		reactionNotInSeasonEmbed(s, reactor.Mention())
 		return
 	}
 
@@ -229,6 +245,9 @@ func sendMessageScoreEmbeds(s *discordgo.Session, messagescores []datamanager.Me
 		responseEmbed.Author = &mea
 		responseEmbed.Description = originalMessage.Content
 
+		embedContextField := getMessageContext(originalMessage.Reference())
+		responseEmbed.Description += "\n" + embedContextField
+
 		// Add user's image thumbnail
 		authorUser, _ := s.User(originalMessage.Author.ID)
 		authorAvatar := authorUser.AvatarURL("")
@@ -246,10 +265,10 @@ func sendMessageScoreEmbeds(s *discordgo.Session, messagescores []datamanager.Me
 					Width:    originalMessage.Attachments[0].Width,
 					Height:   originalMessage.Attachments[0].Height}
 				responseEmbed.Image = &mei
-				responseEmbed.Description += "\n\n contained image: " + originalMessage.Attachments[0].URL
+				responseEmbed.Description += "\n\n Contained Image: " + originalMessage.Attachments[0].URL
 			} else if strings.HasPrefix(fileType, "video") {
 				// Discord does not let bots embed videos...
-				responseEmbed.Description += "\n\n contained video: " + originalMessage.Attachments[0].URL
+				responseEmbed.Description += "\n\n Contained Video: " + originalMessage.Attachments[0].URL
 			}
 		}
 		_, err = s.ChannelMessageSendEmbed(BOT_CHANNEL_ID, responseEmbed)
@@ -268,12 +287,12 @@ func sendMessageScoreEmbeds(s *discordgo.Session, messagescores []datamanager.Me
 func getBotChannel(s *discordgo.Session) (string, string) {
 	ugs, _ := s.UserGuilds(20, "", "")
 	for _, ug := range ugs {
-		if ug.Name == os.Getenv("CREATORBOT_GUILD") {
+		if ug.Name == os.Getenv("BHIMP_GUILD") {
 			gid := ug.ID
 			log.Println("Guild: " + ug.Name)
 			channels, _ := s.GuildChannels(gid)
 			for _, ch := range channels {
-				if ch.Name == os.Getenv("CREATORBOT_CHANNEL") {
+				if ch.Name == os.Getenv("BHIMP_CHANNEL") {
 					log.Println("Bot Channel: " + ch.Name)
 					return gid, ch.ID
 				}
@@ -283,4 +302,36 @@ func getBotChannel(s *discordgo.Session) (string, string) {
 	}
 	log.Fatalln("Couldn't determine the bot guild and channel")
 	return "", ""
+}
+
+func getMessageContext(m *discordgo.MessageReference) string {
+	return fmt.Sprintf("[Message Context](https://discordapp.com/channels/%s/%s/%s)", GUILD_ID, m.ChannelID, m.MessageID)
+}
+
+// determine if a time is after the start of the current season
+func timeInSeason(t *time.Time) bool {
+	// Get season time
+	year, _ := strconv.Atoi(os.Getenv("BHIMP_SEASON_YEAR"))
+	month, _ := strconv.Atoi(os.Getenv("BHIMP_SEASON_MONTH"))
+	day, _ := strconv.Atoi(os.Getenv("BHIMP_SEASON_DAY"))
+	seasonTime := time.Date(year, time.Month(month), day, 0, 0, 0, 0, time.Local)
+	log.Println(t.Unix(), seasonTime.Local().String())
+	if t.Unix() < seasonTime.Unix() {
+		return false
+	}
+	return true
+}
+
+// returns the date of the current season
+func getSeason() string {
+	return fmt.Sprintf("%s/%s/%s", os.Getenv("BHIMP_SEASON_DAY"), os.Getenv("BHIMP_SEASON_MONTH"), os.Getenv("BHIMP_SEASON_YEAR"))
+}
+
+// Sends a reaction not in season embed
+func reactionNotInSeasonEmbed(s *discordgo.Session, userMention string) {
+	responseEmbed := new(discordgo.MessageEmbed)
+	responseEmbed.Color = 0x0e6b0e
+	responseEmbed.Title = "Action Failed"
+	responseEmbed.Description = fmt.Sprintf("%s, you can't react to messages sent before the season. The season started on %s.", userMention, getSeason())
+	s.ChannelMessageSendEmbed(BOT_CHANNEL_ID, responseEmbed)
 }
